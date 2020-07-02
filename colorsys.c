@@ -19,24 +19,44 @@
  * SOFTWARE.
  */
 
-#ifndef __LIGHT_H__
-#define __LIGHT_H__
+#include "colorsys.h"
 
-#include <stddef.h>
-#include <stdint.h>
+static uint8_t _v(int16_t m1, int16_t m2, int16_t hue) {
+    if (hue < 0)
+        hue += 255;
+    hue = hue % 255;
+    int16_t val;
+    if (hue <= 42) {
+        val = m1 + (((m2-m1)*hue*6)/255);
+        return val;
+    } else if (hue < 128) {
+        return m2;
+    } else if (hue <= 170) {
+        val = m1 + ((m2-m1)*(170-hue)*6)/255;
+        return val;
+    }
+    return m1;
+}
 
-struct light_config {
-    uint32_t spi_base;
-    size_t n_leds;
-    uint8_t max_brightness;
-    uint32_t* led_state;
-};
-
-void light_init(struct light_config* config, size_t n_leds);
-uint8_t light_code(uint8_t b);
-void light_set(struct light_config* config, size_t n, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
-void light_set_hls(struct light_config* config, size_t n, uint8_t h, uint8_t l, uint8_t s);
-void light_update(struct light_config* config);
-void light_clear(struct light_config* config);
-
-#endif
+union rgbw hls_to_rgb(uint8_t h, uint8_t l, uint8_t s) {
+    union rgbw res;
+    int16_t m1 = 0, m2 = 0, hue = h;
+    res.w = 0;
+    if (s == 0) {
+        res.r = l;
+        res.g = l;
+        res.b = l;
+    }
+    if (l <= 127) {
+        m2 = l + ((l*s)>>8);
+    } else {
+        m2 = l + s - ((l*s)>>8);
+    }
+    if (m2 > 255)
+        m2 = 255;
+    m1 = 2*l - m2;
+    res.r = _v(m1, m2, hue + 85);
+    res.g = _v(m1, m2, hue);
+    res.b = _v(m1, m2, hue - 85);
+    return res;
+}

@@ -21,7 +21,9 @@
 
 #ifndef __USB_H__
 #define __USB_H__
+
 #include <stddef.h>
+
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/cdc.h>
 

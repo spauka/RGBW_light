@@ -24,6 +24,7 @@
 #endif
 
 #include <stddef.h>
+#include <stdlib.h>
 
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/rcc.h>
@@ -33,6 +34,7 @@
 #include <libopencm3/stm32/spi.h>
 
 #include "usb.h"
+#include "light.h"
 
 static void clock_setup(void)
 {
@@ -44,7 +46,6 @@ static void clock_setup(void)
 
     /*
      * Set prescalers for AHB, ADC, APB1, APB2.
-     * Do this before touching the PLL (TODO: why?).
      */
     rcc_set_hpre(RCC_CFGR_HPRE_SYSCLK_NODIV);    /* Set. 48MHz Max. 72MHz */
     rcc_set_adcpre(RCC_CFGR_ADCPRE_PCLK2_DIV4);  /* Set. 12MHz Max. 14MHz */
@@ -123,11 +124,7 @@ void rtc_isr(void)
     GPIOA_ODR |= d;
 }
 
-uint8_t light_code(uint8_t b) {
-    if (b)
-        return 0x03;
-    return 0x01;
-}
+
 
 int main(void)
 {
@@ -141,36 +138,20 @@ int main(void)
     /* Start the interrupt */
     rtc_interrupt_enable(RTC_SEC);
 
-    /* Set up SPI. We do this manually to enable TX-only mode */
-    rcc_periph_clock_enable(RCC_SPI1);
-    gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_10_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO7);
-    spi_reset(SPI1);
-    spi_init_master(SPI1, SPI_CR1_BAUDRATE_FPCLK_DIV_16, SPI_CR1_CPOL_CLK_TO_0_WHEN_IDLE,
-                    SPI_CR1_CPHA_CLK_TRANSITION_1, SPI_CR1_DFF_8BIT, SPI_CR1_LSBFIRST);
-    spi_enable_software_slave_management(SPI1);
-    spi_set_nss_high(SPI1);
-    spi_enable(SPI1);
+    // Enable the light
+    struct light_config light_config;
+    uint32_t led_states[300];
+    light_config.led_state = led_states;
+    light_init(&light_config, 300);
 
-    /* Send some data over SPI */
-    /* Note: 0 = 0001, 1 = 0011 */
-    uint32_t d = 0xFFFFFFFF;
-    uint8_t transmit_buffer[16] = {0x11, 0x11, 0x11, 0x33,  //W
-                                   0x11, 0x11, 0x11, 0x11,  //B
-                                   0x11, 0x11, 0x11, 0x11,  //R
-                                   0x11, 0x11, 0x11, 0x11}; //G
-    spi_send(SPI1, 0x00);
-    int i, j;
-    for (i = 0; i < 150; i += 1) {
-        for (j = 15; j >= 0; j -= 1) {
-            spi_send(SPI1, transmit_buffer[j]);
+    uint16_t j = 0;
+    while (true) {
+        for (size_t i = 0; i < 300; i += 1) {
+            //light_set(&light_config, i, i, 0, i, 0);
+            light_set_hls(&light_config, i, (i+j)%255, 16, 255);
         }
-    }
-    for (j = 0; j < 1; j += 1) {
-        /* Wait for transfer finished. */
-        while (!(SPI1_SR & SPI_SR_TXE));
-
-        /* Write 8 bits into DR. */
-        SPI1_DR = 0x00;
+        light_update(&light_config);
+        j += 1;
     }
 
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
