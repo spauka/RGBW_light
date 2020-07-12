@@ -25,6 +25,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+static const uint8_t maxValue = 0xFF;
+static const uint16_t maxSaturation = 0xFFFF;
+static const uint32_t hueEdgeLen = 65537;
+static const uint32_t maxHue = hueEdgeLen * 6;
+
 union rgbw {
     struct {
         uint8_t w;
@@ -35,6 +40,6 @@ union rgbw {
     uint32_t rgbw;
 };
 
-union rgbw hls_to_rgb(uint8_t h, uint8_t l, uint8_t s);
+union rgbw hsv_to_rgb(uint32_t h, uint16_t s, uint8_t v);
 
 #endif

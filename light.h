@@ -25,6 +25,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "colorsys.h"
+
 struct light_config {
     uint32_t spi_base;
     size_t n_leds;
@@ -33,9 +35,8 @@ struct light_config {
 };
 
 void light_init(struct light_config* config, size_t n_leds);
-uint8_t light_code(uint8_t b);
 void light_set(struct light_config* config, size_t n, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
-void light_set_hls(struct light_config* config, size_t n, uint8_t h, uint8_t l, uint8_t s);
+void light_set_hsv(struct light_config* config, size_t n, uint32_t h, uint16_t s, uint8_t v);
 void light_update(struct light_config* config);
 void light_clear(struct light_config* config);
 

@@ -43,6 +43,7 @@ static void clock_setup(void)
     rcc_osc_on(RCC_HSE);
     rcc_wait_for_osc_ready(RCC_HSE);
     rcc_set_sysclk_source(RCC_CFGR_SW_SYSCLKSEL_HSECLK);
+    rcc_osc_off(RCC_HSI);
 
     /*
      * Set prescalers for AHB, ADC, APB1, APB2.
@@ -114,9 +115,10 @@ static void nvic_setup(void)
 void rtc_isr(void)
 {
     /* The interrupt flag isn't cleared by hardware, we have to do it. */
-    rtc_clear_flag(RTC_SEC);
+    RTC_CRL &= ~RTC_CRL_SECF;
 
-    uint32_t c = rtc_get_counter_val();
+    // Read the counter value
+    uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
     uint16_t d = c & 0x0007;
     d <<= 8;
     /* Display the bottom 3 bits of the counter with the LED's */
@@ -144,21 +146,18 @@ int main(void)
     light_config.led_state = led_states;
     light_init(&light_config, 300);
 
-    uint16_t j = 0;
-    while (true) {
-        for (size_t i = 0; i < 300; i += 1) {
-            //light_set(&light_config, i, i, 0, i, 0);
-            light_set_hls(&light_config, i, (i+j)%255, 16, 255);
-        }
-        light_update(&light_config);
-        j += 1;
-    }
-
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
     usbd_register_set_config_callback(usbd_dev, cdcacm_set_config);
     /* Poll Forever */
+    uint32_t j = 0;
     while(1) {
         usbd_poll(usbd_dev);
+        for (size_t i = 0; i < 300; i += 1) {
+                //light_set(&light_config, i, i, 0, i, 0);
+                light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xCFFF, maxValue/12);
+        }
+        light_update(&light_config);
+        j += 1;
     }
 
     return 0;

@@ -17,46 +17,68 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
+ * This conversion is based on: Integer-based accurate conversion between RGB and HSV color spaces
+ * (https://doi.org/10.1016/j.compeleceng.2015.08.005)
  */
 
 #include "colorsys.h"
 
-static uint8_t _v(int16_t m1, int16_t m2, int16_t hue) {
-    if (hue < 0)
-        hue += 255;
-    hue = hue % 255;
-    int16_t val;
-    if (hue <= 42) {
-        val = m1 + (((m2-m1)*hue*6)/255);
-        return val;
-    } else if (hue < 128) {
-        return m2;
-    } else if (hue <= 170) {
-        val = m1 + ((m2-m1)*(170-hue)*6)/255;
-        return val;
-    }
-    return m1;
-}
-
-union rgbw hls_to_rgb(uint8_t h, uint8_t l, uint8_t s) {
+union rgbw hsv_to_rgb(uint32_t h, uint16_t s, uint8_t v) {
     union rgbw res;
-    int16_t m1 = 0, m2 = 0, hue = h;
     res.w = 0;
-    if (s == 0) {
-        res.r = l;
-        res.g = l;
-        res.b = l;
+
+    if (s == 0 || v == 0) {
+        res.r = v;
+        res.g = v;
+        res.b = v;
+        return res;
     }
-    if (l <= 127) {
-        m2 = l + ((l*s)>>8);
+
+    uint32_t delta = ((s * v) >> 16) + 1;
+    uint8_t min = v - delta;
+    uint8_t* mid;
+
+    if (h >= hueEdgeLen * 4) {
+        h -= hueEdgeLen * 4;
+        if (h < hueEdgeLen) {
+            res.b = v;
+            res.g = min;
+            mid = &res.r;
+        } else {
+            h -= hueEdgeLen;
+            h = hueEdgeLen - h;
+            res.r = v;
+            res.g = min;
+            mid = &res.b;
+        }
+    } else if (h >= hueEdgeLen * 2) {
+        h -= hueEdgeLen * 2;
+        if (h < hueEdgeLen) {
+            res.g = v;
+            res.r = min;
+            mid = &res.b;
+        } else {
+            h -= hueEdgeLen;
+            h = hueEdgeLen - h;
+            res.b = v;
+            res.r = min;
+            mid = &res.g;
+        }
     } else {
-        m2 = l + s - ((l*s)>>8);
+        if (h < hueEdgeLen) {
+            res.r = v;
+            res.b = min;
+            mid = &res.g;
+        } else {
+            h -= hueEdgeLen;
+            h = hueEdgeLen - h;
+            res.g = v;
+            res.b = min;
+            mid = &res.r;
+        }
     }
-    if (m2 > 255)
-        m2 = 255;
-    m1 = 2*l - m2;
-    res.r = _v(m1, m2, hue + 85);
-    res.g = _v(m1, m2, hue);
-    res.b = _v(m1, m2, hue - 85);
+
+    *mid = ((h * delta) >> 16) + min;
     return res;
 }

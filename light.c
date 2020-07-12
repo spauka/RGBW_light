@@ -20,7 +20,6 @@
  */
 
 #include "light.h"
-#include "colorsys.h"
 
 #ifndef STM32F1
 #define STM32F1
@@ -62,25 +61,26 @@ void light_set(struct light_config* config, size_t n, uint8_t r, uint8_t g, uint
     config->led_state[n] = val.rgbw;
 }
 
-void light_set_hls(struct light_config* config, size_t n, uint8_t h, uint8_t l, uint8_t s) {
+void light_set_hsv(struct light_config* config, size_t n, uint32_t h, uint16_t s, uint8_t v) {
     if (n > config->n_leds)
         return;
 
-    union rgbw val = hls_to_rgb(h, l, s);
+    union rgbw val = hsv_to_rgb(h, s, v);
     config->led_state[n] = val.rgbw;
 }
 
-uint8_t light_code(uint8_t b) {
+static inline uint8_t light_code(uint8_t b) {
     if (b)
-        return 0x03;
+        return 0x07;
     return 0x01;
 }
 
-void light_update(struct light_config* config) {
+void light_update(struct light_config *config) {
     spi_send(config->spi_base, 0x00);
     for (size_t n = 0; n < config->n_leds; n++) {
+        uint32_t rgb = config->led_state[n];
         for (int8_t i = 30; i >= 0; i -= 2) {
-            uint8_t code = (config->led_state[n] >> i);
+            uint8_t code = rgb >> i;
             code = light_code(code & 0x02) | (light_code(code & 0x01) << 4);
             spi_send(config->spi_base, code);
         }
