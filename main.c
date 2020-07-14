@@ -25,6 +25,7 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/rcc.h>
@@ -35,6 +36,13 @@
 
 #include "usb.h"
 #include "light.h"
+#include "printf.h"
+
+static usbd_device *usbd_dev;
+char output_buffer[64];
+size_t output_buffer_size = 0;
+bool welcome_printed = false;
+bool serial_connected = false;
 
 static void clock_setup(void)
 {
@@ -110,6 +118,7 @@ static void nvic_setup(void)
     /* Without this the RTC interrupt routine will never be called. */
     nvic_enable_irq(NVIC_RTC_IRQ);
     nvic_set_priority(NVIC_RTC_IRQ, 1);
+    nvic_enable_irq(NVIC_USB_LP_CAN_RX0_IRQ);
 }
 
 void rtc_isr(void)
@@ -124,14 +133,27 @@ void rtc_isr(void)
     /* Display the bottom 3 bits of the counter with the LED's */
     GPIOA_ODR &= 0xF8FF;
     GPIOA_ODR |= d;
+
+    output_buffer_size = snprintf(output_buffer, 64, "Clock Tick: %d\r\n", c);
 }
 
+void usb_lp_can_rx0_isr(void)
+{
+    /* Poll the state of the USB */
+    usbd_poll(usbd_dev);
+}
 
+void _putchar(char c)
+{
+    if (serial_connected) {
+        int ret = 0;
+        while (ret == 0)
+            ret = usbd_ep_write_packet(usbd_dev, 0x82, &c, 1);
+    }
+}
 
 int main(void)
 {
-    usbd_device *usbd_dev;
-
     clock_setup();
     gpio_setup();
     nvic_setup();
@@ -148,13 +170,27 @@ int main(void)
 
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
     usbd_register_set_config_callback(usbd_dev, cdcacm_set_config);
+    usbd_register_suspend_callback(usbd_dev, cdcacm_suspend);
+    usbd_register_resume_callback(usbd_dev, cdcacm_wkup);
+
     /* Poll Forever */
     uint32_t j = 0;
     while(1) {
-        usbd_poll(usbd_dev);
+        if (serial_connected && !welcome_printed) {
+            printf("SK6812 Light Controller\r\n");
+            printf("Connected...\r\n");
+            welcome_printed = true;
+        } else if (serial_connected) {
+            if (output_buffer_size > 0) {
+                usbd_ep_write_packet(usbd_dev, 0x82, output_buffer, output_buffer_size+1);
+                output_buffer_size = 0;
+            }
+        } else if (!serial_connected) {
+            welcome_printed = false;
+        }
+
         for (size_t i = 0; i < 300; i += 1) {
-                //light_set(&light_config, i, i, 0, i, 0);
-                light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xCFFF, maxValue/12);
+            light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, 8);
         }
         light_update(&light_config);
         j += 1;

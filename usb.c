@@ -25,10 +25,10 @@
 const struct usb_device_descriptor dev = {
     .bLength = USB_DT_DEVICE_SIZE,
     .bDescriptorType = USB_DT_DEVICE,
-    .bcdUSB = 0x0200,
+    .bcdUSB = 0x0200, // USB Version 2
     .bDeviceClass = USB_CLASS_CDC,
-    .bDeviceSubClass = 0,
-    .bDeviceProtocol = 0,
+    .bDeviceSubClass = 0x00,
+    .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = 64,
     .idVendor = 0x0483,
     .idProduct = 0x5740,
@@ -39,11 +39,6 @@ const struct usb_device_descriptor dev = {
     .bNumConfigurations = 1,
 };
 
-/*
- * This notification endpoint isn't implemented. According to CDC spec its
- * optional, but its absence causes a NULL pointer dereference in Linux
- * cdc_acm driver.
- */
 const struct usb_endpoint_descriptor comm_endp[] = {{
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
@@ -58,7 +53,7 @@ const struct usb_endpoint_descriptor data_endp[] = {{
     .bDescriptorType = USB_DT_ENDPOINT,
     .bEndpointAddress = 0x01,
     .bmAttributes = USB_ENDPOINT_ATTR_BULK,
-    .wMaxPacketSize = 32,
+    .wMaxPacketSize = 64,
     .bInterval = 1,
 }, {
     .bLength = USB_DT_ENDPOINT_SIZE,
@@ -107,7 +102,7 @@ const struct usb_interface_descriptor comm_iface[] = {{
     .bNumEndpoints = 1,
     .bInterfaceClass = USB_CLASS_CDC,
     .bInterfaceSubClass = USB_CDC_SUBCLASS_ACM,
-    .bInterfaceProtocol = USB_CDC_PROTOCOL_AT,
+    .bInterfaceProtocol = USB_CDC_PROTOCOL_NONE,
     .iInterface = 0,
 
     .endpoint = comm_endp,
@@ -146,14 +141,14 @@ const struct usb_config_descriptor config = {
     .bConfigurationValue = 1,
     .iConfiguration = 0,
     .bmAttributes = 0x80,
-    .bMaxPower = 0x32,
+    .bMaxPower = 0xfa,
 
     .interface = ifaces,
 };
 
-const char *usb_strings[] = {
+const char * const usb_strings[] = {
     "SKAM Industries",
-    "Sebs Light",
+    "SK6812 Light Controller",
     "LIGHT",
 };
 
@@ -169,13 +164,14 @@ enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_dev, str
 
     switch(req->bRequest) {
     case USB_CDC_REQ_SET_CONTROL_LINE_STATE: {
-        /*
-         * This Linux cdc_acm driver requires this to be implemented
-         * even though it's optional in the CDC spec, and we don't
-         * advertise it in the ACM functional descriptor.
-         */
-        char local_buf[10];
+        char local_buf[sizeof(struct usb_cdc_notification) + 2];
         struct usb_cdc_notification *notif = (struct usb_cdc_notification*)local_buf;
+
+        // Check if we are connecting or disconnecting
+        if (req->wValue & 1)
+            serial_connected = true;
+        else
+            serial_connected = false;
 
         /* We echo signals back to host as notification. */
         notif->bmRequestType = 0xA1;
@@ -183,9 +179,9 @@ enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_dev, str
         notif->wValue = 0;
         notif->wIndex = 0;
         notif->wLength = 2;
-        local_buf[8] = req->wValue & 3;
+        local_buf[8] = req->wValue & 1;
         local_buf[9] = 0;
-        // usbd_ep_write_packet(0x83, buf, 10);
+        usbd_ep_write_packet(usbd_dev, 0x83, local_buf, 10);
         return USBD_REQ_HANDLED;
         }
     case USB_CDC_REQ_SET_LINE_CODING:
@@ -202,9 +198,10 @@ void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
     (void)ep;
 
     char buf[64];
-    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 32);
+    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
     if (len) {
         usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
+        cdcacm_data_rx_cb(usbd_dev, ep);
     }
 }
 
@@ -212,13 +209,23 @@ void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 {
     (void)wValue;
 
-    usbd_ep_setup(usbd_dev, 0x01, USB_ENDPOINT_ATTR_BULK, 32, cdcacm_data_rx_cb);
-    usbd_ep_setup(usbd_dev, 0x82, USB_ENDPOINT_ATTR_BULK, 32, NULL);
-    usbd_ep_setup(usbd_dev, 0x83, USB_ENDPOINT_ATTR_INTERRUPT, 32, NULL);
+    usbd_ep_setup(usbd_dev, 0x01, USB_ENDPOINT_ATTR_BULK, 64, cdcacm_data_rx_cb);
+    usbd_ep_setup(usbd_dev, 0x82, USB_ENDPOINT_ATTR_BULK, 64, NULL);
+    usbd_ep_setup(usbd_dev, 0x83, USB_ENDPOINT_ATTR_INTERRUPT, 16, NULL);
 
     usbd_register_control_callback(
                 usbd_dev,
                 USB_REQ_TYPE_CLASS | USB_REQ_TYPE_INTERFACE,
                 USB_REQ_TYPE_TYPE | USB_REQ_TYPE_RECIPIENT,
                 cdcacm_control_request);
+}
+
+void cdcacm_suspend()
+{
+    *USB_CNTR_REG |= USB_CNTR_FSUSP;
+}
+
+void cdcacm_wkup()
+{
+    *USB_CNTR_REG &= ~USB_CNTR_FSUSP;
 }

@@ -24,6 +24,11 @@
 
 #include <stddef.h>
 
+#ifndef STM32F1
+#define STM32F1
+#endif
+
+#include <libopencm3/stm32/st_usbfs.h>
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/cdc.h>
 
@@ -41,12 +46,17 @@ extern const struct usb_interface_descriptor comm_iface[];
 extern const struct usb_interface_descriptor data_iface[];
 extern const struct usb_interface ifaces[];
 extern const struct usb_config_descriptor config;
-extern const char *usb_strings[];
+extern const char * const usb_strings[];
 
 extern uint8_t usbd_control_buffer[256];
+
+extern bool serial_connected;
 
 enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_dev, struct usb_setup_data *req, uint8_t **buf,
         uint16_t *len, void (**complete)(usbd_device *usbd_dev, struct usb_setup_data *req));
 void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep);
 void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue);
+void cdcacm_suspend(void);
+void cdcacm_wkup(void);
+
 #endif
