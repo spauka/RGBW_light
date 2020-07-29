@@ -33,6 +33,7 @@
 #include <libopencm3/stm32/rtc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/spi.h>
+#include <libopencm3/stm32/adc.h>
 
 #include "usb.h"
 #include "light.h"
@@ -105,12 +106,31 @@ static void clock_setup(void)
 
 static void gpio_setup(void)
 {
-    /* Enable GPIOA clock. */
+    /* Enable clocks. */
     rcc_periph_clock_enable(RCC_GPIOA);
+    rcc_periph_clock_enable(RCC_GPIOB);
+    rcc_periph_clock_enable(RCC_ADC1);
 
     gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
                   GPIO_CNF_OUTPUT_PUSHPULL, GPIO8 | GPIO9 | GPIO10);
     gpio_clear(GPIOA, GPIO8 | GPIO9 | GPIO10);
+
+    gpio_set_mode(GPIOB, GPIO_MODE_INPUT,
+                  GPIO_CNF_INPUT_PULL_UPDOWN, GPIO14 | GPIO15);
+    gpio_set(GPIOB, GPIO14 | GPIO15);
+
+    /* Set Analog In Mode */
+    gpio_set_mode(GPIOB, GPIO_MODE_INPUT,
+                  GPIO_CNF_INPUT_ANALOG, GPIO1);
+
+    /* Enable and configure ADC */
+    adc_set_single_conversion_mode(ADC1);
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPR_SMP_28DOT5CYC);
+    uint8_t channels[1] = {ADC_CHANNEL9};
+    adc_set_regular_sequence(ADC1, 1, channels);
+    adc_power_on(ADC1);
+    adc_reset_calibration(ADC1);
+    adc_calibrate(ADC1);
 }
 
 static void nvic_setup(void)
@@ -118,6 +138,8 @@ static void nvic_setup(void)
     /* Without this the RTC interrupt routine will never be called. */
     nvic_enable_irq(NVIC_RTC_IRQ);
     nvic_set_priority(NVIC_RTC_IRQ, 1);
+
+    /* Enable the USB interrupt too */
     nvic_enable_irq(NVIC_USB_LP_CAN_RX0_IRQ);
 }
 
@@ -168,6 +190,8 @@ int main(void)
     light_config.led_state = led_states;
     light_init(&light_config, 300);
 
+    uint8_t brightness = 8;
+
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
     usbd_register_set_config_callback(usbd_dev, cdcacm_set_config);
     usbd_register_suspend_callback(usbd_dev, cdcacm_suspend);
@@ -189,11 +213,30 @@ int main(void)
             welcome_printed = false;
         }
 
+        uint16_t value = gpio_port_read(GPIOB);
+        if (value & 0x8000) {
+            if (brightness < 8)
+                brightness += 1;
+        }
+        if (value & 0x4000) {
+            if (brightness > 0)
+                brightness -= 1;
+        }
+
         for (size_t i = 0; i < 300; i += 1) {
-            light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, 8);
+            //light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, 8);
+            light_set(&light_config, i, 0, 0, 0, brightness);
         }
         light_update(&light_config);
         j += 1;
+
+        // Print out ADC value
+        if (serial_connected) {
+            adc_start_conversion_direct(ADC1);
+            while (!adc_eoc(ADC1));
+            uint32_t result = adc_read_regular(ADC1);
+            printf("ADC Value: %d\r\n", result);
+        }
     }
 
     return 0;
