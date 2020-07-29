@@ -39,6 +39,8 @@
 #include "light.h"
 #include "printf.h"
 
+static const uint8_t USB_VOLTAGE_CHANNEL = ADC_CHANNEL9;
+
 static usbd_device *usbd_dev;
 char output_buffer[64];
 size_t output_buffer_size = 0;
@@ -133,6 +135,20 @@ static void gpio_setup(void)
     adc_calibrate(ADC1);
 }
 
+uint16_t read_adc(uint8_t channel) {
+    adc_set_regular_sequence(ADC1, 1, &channel);
+    adc_start_conversion_direct(ADC1);
+    while (!adc_eoc(ADC1));
+    return adc_read_regular(ADC1);
+}
+
+uint32_t read_usb_voltage(void) {
+    uint16_t adc_val = read_adc(USB_VOLTAGE_CHANNEL);
+    uint32_t voltage = (3300 * adc_val) / 0xFFF;
+    voltage = (voltage * 1000000)/545454;
+    return voltage;
+}
+
 static void nvic_setup(void)
 {
     /* Without this the RTC interrupt routine will never be called. */
@@ -191,6 +207,8 @@ int main(void)
     light_init(&light_config, 300);
 
     uint8_t brightness = 8;
+    uint16_t max_leds = 300;
+    uint32_t usb_voltage = 0;
 
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
     usbd_register_set_config_callback(usbd_dev, cdcacm_set_config);
@@ -213,9 +231,9 @@ int main(void)
             welcome_printed = false;
         }
 
-        uint16_t value = gpio_port_read(GPIOB);
+        uint16_t value = ~gpio_port_read(GPIOB);
         if (value & 0x8000) {
-            if (brightness < 8)
+            if (brightness < 255)
                 brightness += 1;
         }
         if (value & 0x4000) {
@@ -223,19 +241,25 @@ int main(void)
                 brightness -= 1;
         }
 
-        for (size_t i = 0; i < 300; i += 1) {
+        for (size_t i = 0; i < max_leds; i += 1) {
             //light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, 8);
             light_set(&light_config, i, 0, 0, 0, brightness);
+        }
+        for (size_t i = max_leds; i < 300; i += 1) {
+            light_set(&light_config, i, 0, 0, 0, 0);
         }
         light_update(&light_config);
         j += 1;
 
-        // Print out ADC value
-        if (serial_connected) {
-            adc_start_conversion_direct(ADC1);
-            while (!adc_eoc(ADC1));
-            uint32_t result = adc_read_regular(ADC1);
-            printf("ADC Value: %d\r\n", result);
+        usb_voltage = read_usb_voltage();
+        if (usb_voltage < 4700 && max_leds > 0) {
+            max_leds -= 1;
+        } else if (usb_voltage > 4800 && max_leds < 300) {
+            max_leds += 1;
+        }
+
+        if (serial_connected && j%5 == 0) {
+            printf("USB Voltage: %dmV\r\n", usb_voltage);
         }
     }
 
