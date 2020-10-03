@@ -113,6 +113,7 @@ int main(void)
 
         if (serial_connected && clock_tick) {
             printf("Clock Tick: %d\r\n", clock_tick);
+            printf("Clock Time: %.2d:%.2d:%.2d\r\n", rtc_h(), rtc_m(), rtc_s());
             clock_tick = 0;
         }
 
@@ -121,19 +122,21 @@ int main(void)
 
         /* Read button states */
         uint16_t value = ~gpio_port_read(GPIOB);
-        if (value & 0x8000) {
-            if (brightness < 255)
-                brightness += 1;
+        if (value & 0x8000 && j%25 == 1) {
+            rtc_set_time(rtc_h(), rtc_m()+1, 0);
         }
-        if (value & 0x4000) {
-            if (brightness > 0)
-                brightness -= 1;
+        if (value & 0x4000 && j%25 == 1) {
+            if (rtc_m() == 0)
+                rtc_set_time(rtc_h()-1, 59, 0);
+            else
+                rtc_set_time(rtc_h(), rtc_m()-1, 0);
         }
 
         /* Set light states */
         for (size_t i = 0; i < N_LED; i += 1) {
-            light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, brightness);
-            //light_set(&light_config, i, 0, 0, 0, ((max_brightness < brightness) ? max_brightness : brightness));
+            uint8_t allowed_brightness = ((max_brightness < brightness) ? max_brightness : brightness);
+            light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xAFFF, allowed_brightness);
+            //light_set(&light_config, i, 0, 0, 0, allowed_brightness);
         }
         light_update(&light_config);
         j += 1;
@@ -145,7 +148,7 @@ int main(void)
             max_brightness += 1;
         }
 
-        if (serial_connected && j%100 == 0) {
+        if (serial_connected && j%1000 == 0) {
             printf("USB Voltage: %dmV\r\n", usb_voltage);
             int32_t temperature = read_temp();
             printf("Temperature: %d.%.3dC\r\n", temperature/1000, temperature%1000);

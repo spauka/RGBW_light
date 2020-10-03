@@ -86,3 +86,23 @@ void clock_setup(void)
     /* Set up the RTC using a 32.768KHz Crystal */
     rtc_auto_awake(RCC_LSE, 0x7FFF);
 }
+
+uint8_t rtc_h(void) {
+    uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
+    return (uint8_t) ((c/3600) % 24);
+}
+uint8_t rtc_m(void) {
+    uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
+    return (uint8_t) ((c/60) % 60);
+}
+uint8_t rtc_s(void) {
+    uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
+    return (uint8_t) (c % 60);
+}
+
+void rtc_set_time(uint8_t h, uint8_t m, uint8_t s) {
+    // Calculate time
+    uint32_t t = (h * 3600) + (m * 60) + s;
+    // Set time
+    rtc_set_counter_val(t);
+}

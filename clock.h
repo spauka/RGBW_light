@@ -24,4 +24,10 @@
 
 void clock_setup(void);
 
+uint8_t rtc_h(void);
+uint8_t rtc_m(void);
+uint8_t rtc_s(void);
+
+void rtc_set_time(uint8_t h, uint8_t m, uint8_t s);
+
 #endif
