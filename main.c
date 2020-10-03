@@ -48,6 +48,57 @@ uint32_t clock_tick = 0;
 bool welcome_printed = false;
 bool serial_connected = false;
 
+union rgbw night = {
+    .r = 0,
+    .g = 0,
+    .b = 2,
+    .w = 0
+};
+
+union rgbw dawn = {
+    .r = 8,
+    .g = 0,
+    .b = 8,
+    .w = 4
+};
+
+union rgbw day = {
+    .r = 0,
+    .g = 8,
+    .b = 64,
+    .w = 32
+};
+
+union rgbw dusk = {
+    .r = 6,
+    .g = 0,
+    .b = 16,
+    .w = 1
+};
+
+static const uint8_t dawn_start = 5;
+static const uint8_t day_start = 7;
+static const uint8_t dusk_start = 17;
+static const uint8_t night_start = 20;
+static const uint8_t transition_time = 30; // Time in mins
+
+int16_t interpolate(int16_t start, int16_t stop, int16_t pos, int16_t length) {
+    if (pos < 0)
+        return start;
+    if (pos > length)
+        return stop;
+    return start + ((pos*(stop - start))/(length-1));
+}
+
+union rgbw interpolate_col(union rgbw start, union rgbw stop, int16_t pos, int16_t length) {
+    union rgbw result;
+    result.r = interpolate(start.r, stop.r, pos, length);
+    result.g = interpolate(start.g, stop.g, pos, length);
+    result.b = interpolate(start.b, stop.b, pos, length);
+    result.w = interpolate(start.w, stop.w, pos, length);
+    return result;
+}
+
 static void nvic_setup(void)
 {
     /* Without this the RTC interrupt routine will never be called. */
@@ -92,7 +143,6 @@ int main(void)
     light_init(&light_config, N_LED);
 
     uint8_t brightness = 2;
-    uint8_t max_brightness = 0;
     uint32_t usb_voltage = 0;
 
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
@@ -111,9 +161,36 @@ int main(void)
             welcome_printed = false;
         }
 
-        if (serial_connected && clock_tick) {
-            printf("Clock Tick: %d\r\n", clock_tick);
-            printf("Clock Time: %.2d:%.2d:%.2d\r\n", rtc_h(), rtc_m(), rtc_s());
+        if (clock_tick) {
+            if (serial_connected)
+                printf("Clock Time: %.2d:%.2d:%.2d\r\n", rtc_h(), rtc_m(), rtc_s());
+
+            /* Figure out which time we are in */
+            union rgbw start, stop, result;
+            uint8_t h = rtc_h();
+            if (h < dawn_start) {
+                result = night;
+            } else if (h == dawn_start) {
+                result = interpolate_col(night, dawn, rtc_m(), transition_time);
+            } else if (h < day_start) {
+                result = dawn;
+            } else if (h == day_start) {
+                result = interpolate_col(dawn, day, rtc_m(), transition_time);
+            } else if (h < dusk_start) {
+                result = day;
+            } else if (h == dusk_start) {
+                result = interpolate_col(day, dusk, rtc_m(), transition_time);
+            } else if (h < night_start) {
+                result = dusk;
+            } else if (h == night_start){
+                result = interpolate_col(dusk, night, rtc_m(), transition_time);
+            } else {
+                result = night;
+            }
+            for (size_t i = 0; i < N_LED; i += 1) {
+                led_states[i] = result.rgbw;
+            }
+            light_update(&light_config);
             clock_tick = 0;
         }
 
@@ -122,33 +199,25 @@ int main(void)
 
         /* Read button states */
         uint16_t value = ~gpio_port_read(GPIOB);
-        if (value & 0x8000 && j%25 == 1) {
+        if (value & 0x8000 && j%25000 == 1) {
             rtc_set_time(rtc_h(), rtc_m()+1, 0);
         }
-        if (value & 0x4000 && j%25 == 1) {
+        if (value & 0x4000 && j%25000 == 1) {
             if (rtc_m() == 0)
                 rtc_set_time(rtc_h()-1, 59, 0);
             else
                 rtc_set_time(rtc_h(), rtc_m()-1, 0);
         }
-
-        /* Set light states */
-        for (size_t i = 0; i < N_LED; i += 1) {
-            uint8_t allowed_brightness = ((max_brightness < brightness) ? max_brightness : brightness);
-            light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xAFFF, allowed_brightness);
-            //light_set(&light_config, i, 0, 0, 0, allowed_brightness);
-        }
-        light_update(&light_config);
         j += 1;
 
         usb_voltage = read_usb_voltage();
-        if (usb_voltage < 4700 && max_brightness > 0) {
-            max_brightness -= 1;
-        } else if (usb_voltage > 4800 && max_brightness < 255) {
-            max_brightness += 1;
+        if (usb_voltage < 4700 && light_config.max_brightness > 0) {
+            light_config.max_brightness -= 1;
+        } else if (usb_voltage > 4800 && light_config.max_brightness < 255) {
+            light_config.max_brightness += 1;
         }
 
-        if (serial_connected && j%1000 == 0) {
+        if (serial_connected && j%1000000 == 0) {
             printf("USB Voltage: %dmV\r\n", usb_voltage);
             int32_t temperature = read_temp();
             printf("Temperature: %d.%.3dC\r\n", temperature/1000, temperature%1000);

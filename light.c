@@ -29,10 +29,13 @@
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/spi.h>
 
+#define min(a,b)            (((a) < (b)) ? (a) : (b))
+
 void light_init(struct light_config* config, size_t n_leds) {
     // First, configure the SPI port
     rcc_periph_clock_enable(RCC_SPI1);
     gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_10_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO7);
+    spi_reset(SPI1);
     spi_init_master(SPI1, SPI_CR1_BAUDRATE_FPCLK_DIV_16, SPI_CR1_CPOL_CLK_TO_1_WHEN_IDLE,
                     SPI_CR1_CPHA_CLK_TRANSITION_1, SPI_CR1_DFF_8BIT, SPI_CR1_LSBFIRST);
     spi_enable_software_slave_management(SPI1);
@@ -78,9 +81,14 @@ static inline uint8_t light_code(uint8_t b) {
 void light_update(struct light_config *config) {
     spi_send(config->spi_base, 0x00);
     for (size_t n = 0; n < config->n_leds; n++) {
-        uint32_t rgb = config->led_state[n];
+        union rgbw col;
+        col.rgbw = config->led_state[n];
+        col.r = min(col.r, config->max_brightness);
+        col.g = min(col.g, config->max_brightness);
+        col.b = min(col.b, config->max_brightness);
+        col.w = min(col.w, config->max_brightness);
         for (int8_t i = 30; i >= 0; i -= 2) {
-            uint8_t code = rgb >> i;
+            uint8_t code = col.rgbw >> i;
             code = light_code(code & 0x02) | (light_code(code & 0x01) << 4);
             spi_send(config->spi_base, code);
         }

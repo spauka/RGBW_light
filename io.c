@@ -88,3 +88,22 @@ int32_t read_temp(void) {
     uint32_t temperature = ((1430 - voltage)*1000000 / 4300) + 25000;
     return temperature;
 }
+
+void set_orange() {
+    gpio_set(GPIOA, GPIO8);
+}
+void clear_orange() {
+    gpio_clear(GPIOA, GPIO8);
+}
+void set_green(){
+    gpio_set(GPIOA, GPIO9);
+}
+void clear_green() {
+    gpio_clear(GPIOA, GPIO9);
+}
+void set_blue(){
+    gpio_set(GPIOA, GPIO10);
+}
+void clear_blue() {
+    gpio_clear(GPIOA, GPIO10);
+}

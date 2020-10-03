@@ -28,6 +28,8 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/rtc.h>
 
+#include "clock.h"
+
 void clock_setup(void)
 {
     /* Use an 8MHz external clock to generate a 48MHz SYSCLK */

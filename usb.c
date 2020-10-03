@@ -21,6 +21,7 @@
 
 #include "usb.h"
 #include "printf.h"
+#include "io.h"
 
 char output_buffer[BUF_SIZE];
 size_t buffer_write_pos = 0;
@@ -225,7 +226,9 @@ void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 void usb_lp_can_rx0_isr(void)
 {
     /* Poll the state of the USB */
+    set_orange();
     usbd_poll(usbd_dev);
+    clear_orange();
 }
 
 void cdcacm_suspend()
@@ -242,6 +245,7 @@ size_t output_serial(usbd_device *usbd_dev) {
     if (serial_connected) {
         size_t len = 0;
         if (buffer_read_pos != buffer_write_pos) {
+            set_blue();
             if (buffer_read_pos < buffer_write_pos) {
                 len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], buffer_write_pos-buffer_read_pos);
                 buffer_read_pos += len;
@@ -249,6 +253,7 @@ size_t output_serial(usbd_device *usbd_dev) {
                 len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], BUF_SIZE-buffer_read_pos);
                 buffer_read_pos = (buffer_read_pos+len)%BUF_SIZE;
             }
+            clear_blue();
         }
         return len;
     }

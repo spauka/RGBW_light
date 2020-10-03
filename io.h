@@ -38,4 +38,11 @@ uint16_t read_adc(uint8_t channel);
 uint32_t read_usb_voltage(void);
 int32_t read_temp(void);
 
+void set_orange(void);
+void clear_orange(void);
+void set_green(void);
+void clear_green(void);
+void set_blue(void);
+void clear_blue(void);
+
 #endif
