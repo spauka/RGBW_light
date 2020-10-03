@@ -48,7 +48,7 @@ extern const struct usb_interface ifaces[];
 extern const struct usb_config_descriptor config;
 extern const char * const usb_strings[];
 
-extern uint8_t usbd_control_buffer[256];
+extern uint8_t usbd_control_buffer[128];
 
 extern bool serial_connected;
 

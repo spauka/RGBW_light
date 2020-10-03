@@ -39,11 +39,15 @@
 #include "light.h"
 #include "printf.h"
 
+#define BUF_SIZE 128
 static const uint8_t USB_VOLTAGE_CHANNEL = ADC_CHANNEL9;
+static const uint8_t TEMP_CHANNEL = ADC_CHANNEL16;
 
 static usbd_device *usbd_dev;
-char output_buffer[64];
-size_t output_buffer_size = 0;
+char output_buffer[BUF_SIZE];
+size_t buffer_write_pos = 0;
+size_t buffer_read_pos = 0;
+uint32_t clock_tick = 0;
 bool welcome_printed = false;
 bool serial_connected = false;
 
@@ -128,9 +132,11 @@ static void gpio_setup(void)
     /* Enable and configure ADC */
     adc_set_single_conversion_mode(ADC1);
     adc_set_sample_time_on_all_channels(ADC1, ADC_SMPR_SMP_28DOT5CYC);
+    adc_set_sample_time(ADC1, ADC_CHANNEL16, ADC_SMPR_SMP_239DOT5CYC);
     uint8_t channels[1] = {ADC_CHANNEL9};
     adc_set_regular_sequence(ADC1, 1, channels);
     adc_power_on(ADC1);
+    adc_enable_temperature_sensor();
     adc_reset_calibration(ADC1);
     adc_calibrate(ADC1);
 }
@@ -144,9 +150,16 @@ uint16_t read_adc(uint8_t channel) {
 
 uint32_t read_usb_voltage(void) {
     uint16_t adc_val = read_adc(USB_VOLTAGE_CHANNEL);
-    uint32_t voltage = (3300 * adc_val) / 0xFFF;
+    uint32_t voltage = (3300 * (uint32_t)adc_val) / 0xFFF;
     voltage = (voltage * 1000000)/545454;
     return voltage;
+}
+
+int32_t read_temp(void) {
+    uint16_t adc_val = read_adc(TEMP_CHANNEL);
+    int32_t voltage = (3300 * (int32_t)adc_val) / 0xFFF;
+    uint32_t temperature = ((1430 - voltage)*1000000 / 4300) + 25000;
+    return temperature;
 }
 
 static void nvic_setup(void)
@@ -172,7 +185,8 @@ void rtc_isr(void)
     GPIOA_ODR &= 0xF8FF;
     GPIOA_ODR |= d;
 
-    output_buffer_size = snprintf(output_buffer, 64, "Clock Tick: %d\r\n", c);
+    /* Print out the clock tick in the main thread */
+    clock_tick = c;
 }
 
 void usb_lp_can_rx0_isr(void)
@@ -181,12 +195,33 @@ void usb_lp_can_rx0_isr(void)
     usbd_poll(usbd_dev);
 }
 
+static size_t output_serial(void) {
+    if (serial_connected) {
+        size_t len;
+        if (buffer_read_pos != buffer_write_pos) {
+            if (buffer_read_pos < buffer_write_pos) {
+                len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], buffer_write_pos-buffer_read_pos);
+                buffer_read_pos += len;
+            } else {
+                len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], BUF_SIZE-buffer_read_pos);
+                buffer_read_pos = (buffer_read_pos+len)%BUF_SIZE;
+            }
+        }
+        return len;
+    }
+    return 0;
+}
+
 void _putchar(char c)
 {
     if (serial_connected) {
-        int ret = 0;
-        while (ret == 0)
-            ret = usbd_ep_write_packet(usbd_dev, 0x82, &c, 1);
+        if ((buffer_write_pos+1)%BUF_SIZE != buffer_read_pos) {
+            output_buffer[buffer_write_pos] = c;
+            buffer_write_pos = (buffer_write_pos+1) % BUF_SIZE;
+        } else {
+            if (output_serial())
+                _putchar(c);
+        }
     }
 }
 
@@ -222,15 +257,19 @@ int main(void)
             printf("SK6812 Light Controller\r\n");
             printf("Connected...\r\n");
             welcome_printed = true;
-        } else if (serial_connected) {
-            if (output_buffer_size > 0) {
-                usbd_ep_write_packet(usbd_dev, 0x82, output_buffer, output_buffer_size+1);
-                output_buffer_size = 0;
-            }
         } else if (!serial_connected) {
             welcome_printed = false;
         }
 
+        if (serial_connected && clock_tick) {
+            printf("Clock Tick: %d\r\n", clock_tick);
+            clock_tick = 0;
+        }
+
+        /* Try write out any available packets */
+        output_serial();
+
+        /* Read button states */
         uint16_t value = ~gpio_port_read(GPIOB);
         if (value & 0x8000) {
             if (brightness < 255)
@@ -241,6 +280,7 @@ int main(void)
                 brightness -= 1;
         }
 
+        /* Set light states */
         for (size_t i = 0; i < max_leds; i += 1) {
             //light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, 8);
             light_set(&light_config, i, 0, 0, 0, brightness);
@@ -258,8 +298,10 @@ int main(void)
             max_leds += 1;
         }
 
-        if (serial_connected && j%5 == 0) {
+        if (serial_connected && j%100 == 0) {
             printf("USB Voltage: %dmV\r\n", usb_voltage);
+            int32_t temperature = read_temp();
+            printf("Temperature: %d.%.3dC\r\n", temperature/1000, temperature%1000);
         }
     }
 

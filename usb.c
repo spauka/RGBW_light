@@ -20,7 +20,7 @@
  */
 
 #include "usb.h"
-#include <stdio.h>
+#include "printf.h"
 
 const struct usb_device_descriptor dev = {
     .bLength = USB_DT_DEVICE_SIZE,
@@ -153,7 +153,7 @@ const char * const usb_strings[] = {
 };
 
 /* Buffer to be used for control requests. */
-uint8_t usbd_control_buffer[256];
+uint8_t usbd_control_buffer[128];
 
 enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_dev, struct usb_setup_data *req, uint8_t **buf,
         uint16_t *len, void (**complete)(usbd_device *usbd_dev, struct usb_setup_data *req))
@@ -198,11 +198,9 @@ void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
     (void)ep;
 
     char buf[64];
-    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
-    if (len) {
-        usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
-        cdcacm_data_rx_cb(usbd_dev, ep);
-    }
+    size_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
+    for (size_t i = 0; i < len; i++)
+        _putchar(buf[i]);
 }
 
 void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
