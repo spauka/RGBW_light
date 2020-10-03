@@ -22,6 +22,10 @@
 #include "usb.h"
 #include "printf.h"
 
+char output_buffer[BUF_SIZE];
+size_t buffer_write_pos = 0;
+size_t buffer_read_pos = 0;
+
 const struct usb_device_descriptor dev = {
     .bLength = USB_DT_DEVICE_SIZE,
     .bDescriptorType = USB_DT_DEVICE,
@@ -226,4 +230,35 @@ void cdcacm_suspend()
 void cdcacm_wkup()
 {
     *USB_CNTR_REG &= ~USB_CNTR_FSUSP;
+}
+
+size_t output_serial(usbd_device *usbd_dev) {
+    if (serial_connected) {
+        size_t len = 0;
+        if (buffer_read_pos != buffer_write_pos) {
+            if (buffer_read_pos < buffer_write_pos) {
+                len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], buffer_write_pos-buffer_read_pos);
+                buffer_read_pos += len;
+            } else {
+                len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], BUF_SIZE-buffer_read_pos);
+                buffer_read_pos = (buffer_read_pos+len)%BUF_SIZE;
+            }
+        }
+        return len;
+    }
+    return 0;
+}
+
+void _putchar(char c)
+{
+    if (serial_connected) {
+        if ((buffer_write_pos+1)%BUF_SIZE != buffer_read_pos) {
+            output_buffer[buffer_write_pos] = c;
+            buffer_write_pos = (buffer_write_pos+1) % BUF_SIZE;
+        } else {
+            // Info lost :(
+            //if (output_serial())
+            //    _putchar(c);
+        }
+    }
 }

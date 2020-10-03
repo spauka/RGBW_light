@@ -24,6 +24,8 @@
 
 #include <stddef.h>
 
+#define BUF_SIZE 128
+
 #ifndef STM32F1
 #define STM32F1
 #endif
@@ -38,6 +40,10 @@ struct cdcacm_functional_descriptors_t {
     struct usb_cdc_acm_descriptor acm;
     struct usb_cdc_union_descriptor cdc_union;
 } __attribute__((packed));
+
+extern char output_buffer[BUF_SIZE];
+extern size_t buffer_write_pos;
+extern size_t buffer_read_pos;
 
 extern const struct usb_device_descriptor dev;
 extern const struct usb_endpoint_descriptor comm_endp[];
@@ -58,5 +64,7 @@ void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep);
 void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue);
 void cdcacm_suspend(void);
 void cdcacm_wkup(void);
+
+size_t output_serial(usbd_device *usbd_dev);
 
 #endif

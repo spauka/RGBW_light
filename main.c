@@ -35,80 +35,20 @@
 #include <libopencm3/stm32/spi.h>
 #include <libopencm3/stm32/adc.h>
 
+#include "clock.h"
 #include "usb.h"
 #include "light.h"
 #include "printf.h"
 
-#define BUF_SIZE 128
+#define N_LED 72
+
 static const uint8_t USB_VOLTAGE_CHANNEL = ADC_CHANNEL9;
 static const uint8_t TEMP_CHANNEL = ADC_CHANNEL16;
 
 static usbd_device *usbd_dev;
-char output_buffer[BUF_SIZE];
-size_t buffer_write_pos = 0;
-size_t buffer_read_pos = 0;
 uint32_t clock_tick = 0;
 bool welcome_printed = false;
 bool serial_connected = false;
-
-static void clock_setup(void)
-{
-    /* Use an 8MHz external clock to generate a 48MHz SYSCLK */
-    /* Enable external high-speed oscillator 8MHz. */
-    rcc_osc_on(RCC_HSE);
-    rcc_wait_for_osc_ready(RCC_HSE);
-    rcc_set_sysclk_source(RCC_CFGR_SW_SYSCLKSEL_HSECLK);
-    rcc_osc_off(RCC_HSI);
-
-    /*
-     * Set prescalers for AHB, ADC, APB1, APB2.
-     */
-    rcc_set_hpre(RCC_CFGR_HPRE_SYSCLK_NODIV);    /* Set. 48MHz Max. 72MHz */
-    rcc_set_adcpre(RCC_CFGR_ADCPRE_PCLK2_DIV4);  /* Set. 12MHz Max. 14MHz */
-    rcc_set_ppre1(RCC_CFGR_PPRE1_HCLK_DIV2);     /* Set. 24MHz Max. 36MHz */
-    rcc_set_ppre2(RCC_CFGR_PPRE2_HCLK_NODIV);    /* Set. 48MHz Max. 72MHz */
-
-    /*
-     * Sysclk runs with 24MHz -> 0 waitstates.
-     * 0WS from 0-24MHz
-     * 1WS from 24-48MHz
-     * 2WS from 48-72MHz
-     */
-    flash_set_ws(FLASH_ACR_LATENCY_1WS);
-
-    /*
-     * Set the PLL multiplication factor to 3.
-     * 8MHz (external) * 6 (multiplier) = 48MHz
-     */
-    rcc_set_pll_multiplication_factor(RCC_CFGR_PLLMUL_PLL_CLK_MUL6);
-
-    /* Select HSE as PLL source. */
-    rcc_set_pll_source(RCC_CFGR_PLLSRC_HSE_CLK);
-
-    /*
-     * External frequency undivided before entering PLL
-     * (only valid/needed for HSE).
-     */
-    rcc_set_pllxtpre(RCC_CFGR_PLLXTPRE_HSE_CLK);
-
-    /* Enable PLL oscillator and wait for it to stabilize. */
-    rcc_osc_on(RCC_PLL);
-    rcc_wait_for_osc_ready(RCC_PLL);
-
-    /* Select PLL as SYSCLK source. */
-    rcc_set_sysclk_source(RCC_CFGR_SW_SYSCLKSEL_PLLCLK);
-
-    /* Set the peripheral clock frequencies used */
-    rcc_ahb_frequency = 48000000;
-    rcc_apb1_frequency = 24000000;
-    rcc_apb2_frequency = 48000000;
-
-    /* Set USB divider */
-    rcc_set_usbpre(RCC_CFGR_USBPRE_PLL_CLK_NODIV);
-
-    /* Set up the RTC using a 32.768KHz Crystal */
-    rtc_auto_awake(RCC_LSE, 0x7FFF);
-}
 
 static void gpio_setup(void)
 {
@@ -179,11 +119,11 @@ void rtc_isr(void)
 
     // Read the counter value
     uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
-    uint16_t d = c & 0x0007;
-    d <<= 8;
-    /* Display the bottom 3 bits of the counter with the LED's */
-    GPIOA_ODR &= 0xF8FF;
-    GPIOA_ODR |= d;
+    // uint16_t d = c & 0x0007;
+    // d <<= 8;
+    // /* Display the bottom 3 bits of the counter with the LED's */
+    // GPIOA_ODR &= 0xF8FF;
+    // GPIOA_ODR |= d;
 
     /* Print out the clock tick in the main thread */
     clock_tick = c;
@@ -193,36 +133,6 @@ void usb_lp_can_rx0_isr(void)
 {
     /* Poll the state of the USB */
     usbd_poll(usbd_dev);
-}
-
-static size_t output_serial(void) {
-    if (serial_connected) {
-        size_t len;
-        if (buffer_read_pos != buffer_write_pos) {
-            if (buffer_read_pos < buffer_write_pos) {
-                len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], buffer_write_pos-buffer_read_pos);
-                buffer_read_pos += len;
-            } else {
-                len = usbd_ep_write_packet(usbd_dev, 0x82, &output_buffer[buffer_read_pos], BUF_SIZE-buffer_read_pos);
-                buffer_read_pos = (buffer_read_pos+len)%BUF_SIZE;
-            }
-        }
-        return len;
-    }
-    return 0;
-}
-
-void _putchar(char c)
-{
-    if (serial_connected) {
-        if ((buffer_write_pos+1)%BUF_SIZE != buffer_read_pos) {
-            output_buffer[buffer_write_pos] = c;
-            buffer_write_pos = (buffer_write_pos+1) % BUF_SIZE;
-        } else {
-            if (output_serial())
-                _putchar(c);
-        }
-    }
 }
 
 int main(void)
@@ -237,12 +147,12 @@ int main(void)
 
     // Enable the light
     struct light_config light_config;
-    uint32_t led_states[300];
+    uint32_t led_states[N_LED];
     light_config.led_state = led_states;
-    light_init(&light_config, 300);
+    light_init(&light_config, N_LED);
 
     uint8_t brightness = 8;
-    uint16_t max_leds = 300;
+    uint8_t max_brightness = 0;
     uint32_t usb_voltage = 0;
 
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
@@ -267,7 +177,7 @@ int main(void)
         }
 
         /* Try write out any available packets */
-        output_serial();
+        output_serial(usbd_dev);
 
         /* Read button states */
         uint16_t value = ~gpio_port_read(GPIOB);
@@ -281,21 +191,18 @@ int main(void)
         }
 
         /* Set light states */
-        for (size_t i = 0; i < max_leds; i += 1) {
-            //light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, 8);
-            light_set(&light_config, i, 0, 0, 0, brightness);
-        }
-        for (size_t i = max_leds; i < 300; i += 1) {
-            light_set(&light_config, i, 0, 0, 0, 0);
+        for (size_t i = 0; i < N_LED; i += 1) {
+            light_set_hsv(&light_config, i, ((i+j)<<10)%maxHue, 0xFFFF, brightness);
+            //light_set(&light_config, i, 0, 0, 0, ((max_brightness < brightness) ? max_brightness : brightness));
         }
         light_update(&light_config);
         j += 1;
 
         usb_voltage = read_usb_voltage();
-        if (usb_voltage < 4700 && max_leds > 0) {
-            max_leds -= 1;
-        } else if (usb_voltage > 4800 && max_leds < 300) {
-            max_leds += 1;
+        if (usb_voltage < 4700 && max_brightness > 0) {
+            max_brightness -= 1;
+        } else if (usb_voltage > 4800 && max_brightness < 255) {
+            max_brightness += 1;
         }
 
         if (serial_connected && j%100 == 0) {
