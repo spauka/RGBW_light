@@ -45,6 +45,8 @@ extern char output_buffer[BUF_SIZE];
 extern size_t buffer_write_pos;
 extern size_t buffer_read_pos;
 
+extern usbd_device *usbd_dev;
+
 extern const struct usb_device_descriptor dev;
 extern const struct usb_endpoint_descriptor comm_endp[];
 extern const struct usb_endpoint_descriptor data_endp[];

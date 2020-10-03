@@ -36,71 +36,17 @@
 #include <libopencm3/stm32/adc.h>
 
 #include "clock.h"
+#include "io.h"
 #include "usb.h"
 #include "light.h"
 #include "printf.h"
 
 #define N_LED 72
 
-static const uint8_t USB_VOLTAGE_CHANNEL = ADC_CHANNEL9;
-static const uint8_t TEMP_CHANNEL = ADC_CHANNEL16;
-
-static usbd_device *usbd_dev;
+usbd_device *usbd_dev;
 uint32_t clock_tick = 0;
 bool welcome_printed = false;
 bool serial_connected = false;
-
-static void gpio_setup(void)
-{
-    /* Enable clocks. */
-    rcc_periph_clock_enable(RCC_GPIOA);
-    rcc_periph_clock_enable(RCC_GPIOB);
-    rcc_periph_clock_enable(RCC_ADC1);
-
-    gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
-                  GPIO_CNF_OUTPUT_PUSHPULL, GPIO8 | GPIO9 | GPIO10);
-    gpio_clear(GPIOA, GPIO8 | GPIO9 | GPIO10);
-
-    gpio_set_mode(GPIOB, GPIO_MODE_INPUT,
-                  GPIO_CNF_INPUT_PULL_UPDOWN, GPIO14 | GPIO15);
-    gpio_set(GPIOB, GPIO14 | GPIO15);
-
-    /* Set Analog In Mode */
-    gpio_set_mode(GPIOB, GPIO_MODE_INPUT,
-                  GPIO_CNF_INPUT_ANALOG, GPIO1);
-
-    /* Enable and configure ADC */
-    adc_set_single_conversion_mode(ADC1);
-    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPR_SMP_28DOT5CYC);
-    adc_set_sample_time(ADC1, ADC_CHANNEL16, ADC_SMPR_SMP_239DOT5CYC);
-    uint8_t channels[1] = {ADC_CHANNEL9};
-    adc_set_regular_sequence(ADC1, 1, channels);
-    adc_power_on(ADC1);
-    adc_enable_temperature_sensor();
-    adc_reset_calibration(ADC1);
-    adc_calibrate(ADC1);
-}
-
-uint16_t read_adc(uint8_t channel) {
-    adc_set_regular_sequence(ADC1, 1, &channel);
-    adc_start_conversion_direct(ADC1);
-    while (!adc_eoc(ADC1));
-    return adc_read_regular(ADC1);
-}
-
-uint32_t read_usb_voltage(void) {
-    uint16_t adc_val = read_adc(USB_VOLTAGE_CHANNEL);
-    uint32_t voltage = (3300 * (uint32_t)adc_val) / 0xFFF;
-    voltage = (voltage * 1000000)/545454;
-    return voltage;
-}
-
-int32_t read_temp(void) {
-    uint16_t adc_val = read_adc(TEMP_CHANNEL);
-    int32_t voltage = (3300 * (int32_t)adc_val) / 0xFFF;
-    uint32_t temperature = ((1430 - voltage)*1000000 / 4300) + 25000;
-    return temperature;
-}
 
 static void nvic_setup(void)
 {
@@ -129,12 +75,6 @@ void rtc_isr(void)
     clock_tick = c;
 }
 
-void usb_lp_can_rx0_isr(void)
-{
-    /* Poll the state of the USB */
-    usbd_poll(usbd_dev);
-}
-
 int main(void)
 {
     clock_setup();
@@ -151,7 +91,7 @@ int main(void)
     light_config.led_state = led_states;
     light_init(&light_config, N_LED);
 
-    uint8_t brightness = 8;
+    uint8_t brightness = 2;
     uint8_t max_brightness = 0;
     uint32_t usb_voltage = 0;
 

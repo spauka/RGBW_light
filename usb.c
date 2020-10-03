@@ -222,6 +222,12 @@ void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
                 cdcacm_control_request);
 }
 
+void usb_lp_can_rx0_isr(void)
+{
+    /* Poll the state of the USB */
+    usbd_poll(usbd_dev);
+}
+
 void cdcacm_suspend()
 {
     *USB_CNTR_REG |= USB_CNTR_FSUSP;
@@ -256,9 +262,8 @@ void _putchar(char c)
             output_buffer[buffer_write_pos] = c;
             buffer_write_pos = (buffer_write_pos+1) % BUF_SIZE;
         } else {
-            // Info lost :(
-            //if (output_serial())
-            //    _putchar(c);
+            if (output_serial(usbd_dev))
+                _putchar(c);
         }
     }
 }
