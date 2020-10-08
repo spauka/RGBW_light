@@ -24,6 +24,7 @@
 
 void clock_setup(void);
 
+uint8_t rtc_d(void);
 uint8_t rtc_h(void);
 uint8_t rtc_m(void);
 uint8_t rtc_s(void);

@@ -48,10 +48,17 @@ uint32_t clock_tick = 0;
 bool welcome_printed = false;
 bool serial_connected = false;
 
+union rgbw deep_night = {
+    .r = 0,
+    .g = 0,
+    .b = 1,
+    .w = 0
+};
+
 union rgbw night = {
     .r = 0,
     .g = 0,
-    .b = 2,
+    .b = 1,
     .w = 0
 };
 
@@ -76,11 +83,21 @@ union rgbw dusk = {
     .w = 1
 };
 
-static const uint8_t dawn_start = 5;
-static const uint8_t day_start = 7;
+static const uint8_t dawn_brightness = 75;
+static const uint8_t day_brightness = 100;
+static const uint8_t dusk_brightness = 80;
+static const uint8_t night_brightness = 50;
+static const uint8_t deep_night_brightness = 10;
+
+static const uint8_t dawn_start = 6;
+static const uint8_t day_start = 8;
 static const uint8_t dusk_start = 17;
 static const uint8_t night_start = 20;
+static const uint8_t deep_night_start = 22;
 static const uint8_t transition_time = 30; // Time in mins
+
+int16_t interpolate(int16_t start, int16_t stop, int16_t pos, int16_t length);
+union rgbw interpolate_col(union rgbw start, union rgbw stop, int16_t pos, int16_t length);
 
 int16_t interpolate(int16_t start, int16_t stop, int16_t pos, int16_t length) {
     if (pos < 0)
@@ -142,7 +159,6 @@ int main(void)
     light_config.led_state = led_states;
     light_init(&light_config, N_LED);
 
-    uint8_t brightness = 2;
     uint32_t usb_voltage = 0;
 
     usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
@@ -162,33 +178,59 @@ int main(void)
         }
 
         if (clock_tick) {
-            if (serial_connected)
-                printf("Clock Time: %.2d:%.2d:%.2d\r\n", rtc_h(), rtc_m(), rtc_s());
+            if (serial_connected) {
+                printf("Clock Time: %.4d:%.2d:%.2d:%.2d\r\n", rtc_d(), rtc_h(), rtc_m(), rtc_s());
+            }
 
             /* Figure out which time we are in */
-            union rgbw start, stop, result;
+            union rgbw result;
+            uint16_t brightness;
             uint8_t h = rtc_h();
             if (h < dawn_start) {
-                result = night;
+                result = deep_night;
+                brightness = deep_night_brightness;
             } else if (h == dawn_start) {
-                result = interpolate_col(night, dawn, rtc_m(), transition_time);
+                result = interpolate_col(deep_night, dawn, rtc_m(), transition_time);
+                brightness = interpolate(deep_night_brightness, dawn_brightness, rtc_m(), transition_time);
             } else if (h < day_start) {
                 result = dawn;
+                brightness = dawn_brightness;
             } else if (h == day_start) {
                 result = interpolate_col(dawn, day, rtc_m(), transition_time);
+                brightness = interpolate(dawn_brightness, day_brightness, rtc_m(), transition_time);
             } else if (h < dusk_start) {
                 result = day;
+                brightness = day_brightness;
             } else if (h == dusk_start) {
                 result = interpolate_col(day, dusk, rtc_m(), transition_time);
+                brightness = interpolate(day_brightness, dusk_brightness, rtc_m(), transition_time);
             } else if (h < night_start) {
                 result = dusk;
+                brightness = dusk_brightness;
             } else if (h == night_start){
                 result = interpolate_col(dusk, night, rtc_m(), transition_time);
-            } else {
+                brightness = interpolate(dusk_brightness, night_brightness, rtc_m(), transition_time);
+            } else if (h < deep_night_start) {
                 result = night;
+                brightness = night_brightness;
+            } else if (h == deep_night_start) {
+                result = interpolate_col(night, deep_night, rtc_m(), transition_time);
+                brightness = interpolate(night_brightness, deep_night_brightness, rtc_m(), transition_time);
+            } else {
+                result = deep_night;
+                brightness = deep_night_brightness;
             }
+            brightness = (brightness*N_LED)/100;
+            uint16_t num_should_light = 0, num_lit = 0;
             for (size_t i = 0; i < N_LED; i += 1) {
-                led_states[i] = result.rgbw;
+                num_should_light = (brightness*(i+1))/100;
+                if (num_lit < num_should_light) {
+                    led_states[i] = result.rgbw;
+                    num_lit++;
+                }
+                else {
+                    led_states[i] = 0;
+                }
             }
             light_update(&light_config);
             clock_tick = 0;

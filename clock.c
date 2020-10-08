@@ -89,6 +89,11 @@ void clock_setup(void)
     rtc_auto_awake(RCC_LSE, 0x7FFF);
 }
 
+uint8_t rtc_d(void) {
+    uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
+    return (uint8_t) ((c/(3600*24)));
+}
+
 uint8_t rtc_h(void) {
     uint32_t c = (RTC_CNTH << 16) | RTC_CNTL;
     return (uint8_t) ((c/3600) % 24);
